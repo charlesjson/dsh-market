@@ -16,7 +16,6 @@
 通过固定 GitHub 版本安装（安装后重启对应实例）：
 
 ```sh
-dsh plugin --profile desktop add github:charlesjson/dsh-market#v0.1.0
 dsh plugin --profile web add github:charlesjson/dsh-market#v0.1.0
 ```
 
@@ -26,7 +25,7 @@ dsh plugin --profile web add github:charlesjson/dsh-market#v0.1.0
 dsh plugin --profile headless add github:charlesjson/dsh-market#v0.1.0
 ```
 
-桌面版插件页可填写 `github:charlesjson/dsh-market#v0.1.0`。不要给当前 profile 同时安装两个版本。
+桌面版在插件管理页填写 `github:charlesjson/dsh-market#v0.1.0` 后安装并启用。`desktop` profile 由 Electron 管理，npm 安装的通用 dsh CLI 会拒绝管理它；需要命令行管理时使用桌面版内置命令运行时。不要给当前 profile 同时安装两个版本。
 仓库保留编译后的 `dist`，通过 GitHub 安装不需要现场编译。也可在本地 `npm pack` 后安装生成的 tgz。
 包内包含 `dist` 运行文件；安装 tarball 无需 TypeScript 编译器。
 目标运行时：Node ≥22.19，dsh `0.2.2-rc.1`；另验证了 `0.2.0-rc.2` 的工具注册与报价执行。
