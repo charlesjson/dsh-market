@@ -1,6 +1,6 @@
 # dsh-market · 加密货币与美股行情
 
-让 DeepSeek Harness 在对话中调用真实市场数据，查询报价、OHLCV K 线、成交量和盘口，在对话正文内嵌 PNG 蜡烛图，同时生成可下载的 SVG 与 CSV。
+让 DeepSeek Harness 在对话中调用真实市场数据，查询报价、OHLCV K 线、成交量和盘口，生成可缩放、平移、悬停查看价格和 OHLCV 的离线 HTML 交互图，在对话正文内嵌 PNG 预览，并保留 SVG 与 CSV 下载。
 独立插件，不需要另配大模型，不注册交易或下单功能。
 
 可以直接向 dsh 说：
@@ -16,16 +16,16 @@
 通过固定 GitHub 版本安装（安装后重启对应实例）：
 
 ```sh
-dsh plugin --profile web add github:charlesjson/dsh-market#v0.1.1
+dsh plugin --profile web add github:charlesjson/dsh-market#v0.2.0
 ```
 
 命令行或 headless 实例使用自己的 profile，例如：
 
 ```sh
-dsh plugin --profile headless add github:charlesjson/dsh-market#v0.1.1
+dsh plugin --profile headless add github:charlesjson/dsh-market#v0.2.0
 ```
 
-桌面版在插件管理页填写 `github:charlesjson/dsh-market#v0.1.1` 后安装并启用。`desktop` profile 由 Electron 管理，npm 安装的通用 dsh CLI 会拒绝管理它；需要命令行管理时使用桌面版内置命令运行时。不要给当前 profile 同时安装两个版本。
+桌面版在插件管理页填写 `github:charlesjson/dsh-market#v0.2.0` 后安装并启用。`desktop` profile 由 Electron 管理，npm 安装的通用 dsh CLI 会拒绝管理它；需要命令行管理时使用桌面版内置命令运行时。不要给当前 profile 同时安装两个版本。
 仓库保留编译后的 `dist`，通过 GitHub 安装不需要现场编译。也可在本地 `npm pack` 后安装生成的 tgz。
 包内包含 `dist` 运行文件；安装 tarball 无需 TypeScript 编译器。
 目标运行时：Node ≥22.19，dsh `0.2.2-rc.1`；另验证了 `0.2.0-rc.2` 的工具注册与报价执行。
@@ -54,7 +54,9 @@ dsh plugin --profile web remove dsh-market
 采样完成后一次返回结果，遇到数据源错误停止后续轮询。它不提供 WebSocket 推送、对话外后台订阅或永久盯盘。
 数据源的地区限制、账户权限和限流会原样体现为明确错误，不自动切换成另一个市场或延迟数据源。
 
-画图结果现在额外包含 PNG 预览和 `inlineMarkdown`，模型在最终回答中用 `![说明](<图片绝对路径>)` 将图片直接嵌入正文。不会要求模型具备视觉输入能力。SVG/CSV 保留为下载附件。标准桌面版和 Web 版本机附件存储支持这条路径；自定义无文件路径的存储后端会明确提示只能打开 PNG 附件。旧回答中的 SVG 文件卡片不会自动转换，需要重新请求画图。
+画图结果包含离线交互 HTML 与 `interactiveMarkdown` 链接，点击后在 dsh 右侧 HTML 预览打开。支持十字光标、悬停时间/开高低收/成交量、滚轮及按钮缩放、拖动平移、最近50根和重置全图；交互图保留本次最多1000根数据。dsh 需要开启“代码工作工具”以运行 HTML 脚本；关闭时显示静态回退图，也可用浏览器打开 HTML。图表库和数据内嵌，无需 CDN，浏览器不接收 API Key、不请求行情接口。它是本次查询快照，不自动刷新。
+
+画图结果同时包含 PNG 预览和 `inlineMarkdown`，模型在最终回答中用 `![说明](<图片绝对路径>)` 将图片直接嵌入正文。不会要求模型具备视觉输入能力。SVG/CSV 保留为下载附件。标准桌面版和 Web 版本机附件存储支持这条路径；自定义无文件路径的存储后端会明确提示只能打开 PNG 附件。旧回答中的 SVG 文件卡片不会自动转换，需要重新请求画图。
 
 ## 配置美股 Key
 
@@ -101,7 +103,7 @@ Key 只放在发往 Alpaca 固定 HTTPS 域名的请求头，不作为工具参�
 | `market_candles` | `market, symbol, interval?, limit?, start?, end?, pageToken?` | 升序 OHLCV、`closed`、数据源、时间范围、分页提示 |
 | `market_orderbook` | `market: "crypto", symbol, limit?`（1–100档） | 买卖盘口、价差、更新序号；源时间缺失时明确标注 |
 | `market_watch` | `instruments`（最多5个）、`samples?`、`intervalSeconds?` | 多次报价采样，`complete` 和停止原因 |
-| `market_chart` | 同 `market_candles` | PNG 预览、`inlineMarkdown` 图片语法及 SVG/CSV 原生附件；需要宿主提供 `attachments` 服务 |
+| `market_chart` | 同 `market_candles` | 交互 HTML、`interactiveMarkdown` 链接、PNG 预览和 SVG/CSV 附件；需要宿主提供 `attachments` 服务 |
 
 `market` 必须为 `crypto` 或 `us`。BTC、ETH 等未指定计价币的加密货币代码默认附加 USDT；可用 `ETHBTC`、`BTC/USDC` 明确交易对。
 USDT 与 USD 分别标注。美股使用 AAPL、NVDA、BRK.B 等 ticker，不做模糊名称猜测。
@@ -155,3 +157,5 @@ npm pack
 [Alpaca Snapshot](https://docs.alpaca.markets/us/reference/stocksnapshotsingle)、
 [Alpaca Historical Bars](https://docs.alpaca.markets/us/reference/stockbars)、
 [Alpaca Market Data FAQ](https://docs.alpaca.markets/us/docs/market-data-faq)。
+
+交互图使用 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)，遵循 Apache-2.0 许可，生成文件保留署名、链接和许可全文。

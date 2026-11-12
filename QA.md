@@ -21,3 +21,11 @@
 23 项测试通过，覆盖 PNG 签名和尺寸、原生工具输出、带空格路径及无本机路径后端的明确降级。
 使用真实 BTCUSDT 最近48根小时K线生成 PNG 并视觉检查，示例见 docs/inline-example.png。
 PNG 渲染依赖采用预编译的 resvg-js，无需宿主额外安装绘图命令或允许构建脚本。
+
+## 0.2.0：离线交互 HTML
+
+25项测试通过；原生工具额外返回HTML附件与interactiveMarkdown链接，HTML保留本页全部数据。
+浏览器中使用真实180根BTCUSDT小时K线，验证十字光标价格、悬停OHLCV、滚轮缩放、拖动平移、最近50根和重置。
+在与dsh相同的sandbox="allow-scripts"（无allow-same-origin）iframe中成功加载，关闭脚本时保留静态SVG回退。
+HTML内嵌图表库与数据，不使用CDN、行情请求或密钥；保留TradingView署名及Apache-2.0许可。
+界面验证截图：docs/interactive-preview.png；离线示例：docs/interactive-example.html。
