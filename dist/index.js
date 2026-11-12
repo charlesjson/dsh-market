@@ -1,0 +1,94 @@
+import { defineTool } from '@deepseek-ai/dsh-tools';
+import '@deepseek-ai/dsh-system-prompt';
+import { AttachmentId } from '@deepseek-ai/dsh-attachment';
+import { MarketClient } from './client.js';
+import { renderChart, renderCsv } from './chart.js';
+import { record } from './validation.js';
+export { Config } from './config.js';
+export { MarketClient } from './client.js';
+export const name = 'market';
+export const inject = ['tools', 'systemPrompt'];
+const market = { type: 'string', enum: ['crypto', 'us'], description: 'crypto = Binance 现货；us = 美股' };
+const symbol = { type: 'string', description: 'crypto: BTC / BTCUSDT / BTC/USDT（省略计价币时为 USDT）；us: AAPL / NVDA' };
+const instrumentSchema = { type: 'object', properties: { market, symbol }, required: ['market', 'symbol'], additionalProperties: false };
+const batch = { type: 'array', items: instrumentSchema, minItems: 1, maxItems: 10 };
+const candleProperties = {
+    market, symbol,
+    interval: { type: 'string', description: '默认 1h。通用：1m,5m,15m,30m,1h,4h,1d,1w,1M（月，区分大小写）。crypto 另支持 3m,2h,6h,8h,12h,3d。' },
+    limit: { type: 'integer', minimum: 1, maximum: 1000, description: '默认 100，最多 1000。图表显示最近 300 根，CSV 保留本次全部。' },
+    start: { type: 'string', description: '含时区 RFC3339 起始时间。美股默认有界回看窗口，按最新优先取一页；Binance 指定 start 后按起点取一页。' },
+    end: { type: 'string', description: '含时区 RFC3339 截止时间；crypto 为不含端点，美股遵循 Alpaca 端点语义。' },
+    pageToken: { type: 'string', description: '仅美股：上次返回的 nextPageToken，翻页时保留相同代码、周期、start/end。' },
+};
+const instructions = `行情工具（market_）：
+查询价格和 K 线时调用工具获取新数据，禁止凭模型记忆编造“实时”报价。明确 crypto 或 us 市场。
+crypto 为 Binance 现货，BTC 默认 BTCUSDT，USDT 不等于 USD；美股为 Alpaca，缺 Key 时解释配置，不编造数据。
+回答标注 provider/feed、计价币种、sourceAt 和 fetchedAt；sourceAt 是成交时间，fetchedAt 仅是本机接收时间。
+stale=true、price=null、错误或空 K 线时明确说明；休市/低成交量会导致旧成交，不据此推断市场开闭。
+iex 仅单一交易所，不能称全美综合价格或全市场成交量；delayed_sip 固定延迟15分钟；sip 需要相应订阅权限。
+crypto 涨跌以滚动24小时计，美股以 previous_daily_close 计，基准不同不可直接混用。
+K线为未复权 OHLCV，时间 ISO UTC，股票日/周/月按纽约交易所日历；closed=false 的当前柱未完成，closed=true 也可能被数据源修订。
+每次只取一页，数量不足可能因为休市/缺成交/回看窗口，不能补造K线。美股翻页保持返回的 rangeStart/rangeEnd；crypto hasMore 只是“达到本页上限可能还有数据”，根据首尾时间继续查。
+market_watch 是最长75秒的有界轮询，采样结束后一次返回，不是后台订阅、WebSocket推送或永久盯盘；不要承诺在对话外自动通知。
+需要K线图或下载表格时用 market_chart（若附件服务可用）；展示SVG图表和CSV附件，不把长数组逐行复述。`;
+export function apply(ctx, config = {}) {
+    const client = new MarketClient(config);
+    const lifetime = new AbortController();
+    ctx.effect(() => () => lifetime.abort(new Error('dsh-market 插件已卸载')));
+    const signalFor = (signal) => AbortSignal.any([signal, lifetime.signal]);
+    ctx.systemPrompt.section({ name: 'tool:market', order: 660, text: ({ scope }) => ctx.tools.get('market_quote', scope) ? instructions : '' });
+    const register = (toolName, title, description, properties, required, run, timeoutMs = client.config.timeoutMs + 5000) => {
+        const definition = {
+            name: toolName, description, parameters: { type: 'object', properties, required, additionalProperties: false },
+            output: { schema: { type: 'object', additionalProperties: true }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
+            execute: (args, execution) => run(record(args), signalFor(execution.signal)),
+            timeoutMs, isConcurrencySafe: () => true,
+            presentCall: () => ({ card: 'generic', kind: 'read', title }),
+        };
+        ctx.tools.register(definition);
+    };
+    register('market_status', '行情数据源状态', '检查数据源与美股 Key 是否配置（不返回密钥，不发网络请求，不代表网络/权限验证通过）。', {}, [], () => client.status());
+    register('market_quote', '查询最新行情', '获取 1–10 个加密货币/美股最近成交、买卖价、涨跌、成交量及源时间。多标的可部分成功，检查 errors/complete/stale。美股需要 Alpaca Key。', { instruments: batch }, ['instruments'], (args, signal) => client.quotes(args, signal));
+    register('market_candles', '查询 OHLCV K 线', '获取真实 OHLCV K 线，按时间升序返回，含未收盘标记、来源与分页信息；不填补缺失周期。', candleProperties, ['market', 'symbol'], (args, signal) => client.candles(args, signal));
+    register('market_orderbook', '查询加密货币盘口', '获取 Binance 现货多档买卖盘口及价差；美股买一卖一用 market_quote。', { market, symbol, limit: { type: 'integer', minimum: 1, maximum: 100 } }, ['market', 'symbol'], (args, signal) => client.orderbook(args, signal));
+    register('market_watch', '连续采样行情', '对 1–5 个标的短时连续采样，间隔2–30秒、2–12次，间隔总计≤60秒、总执行≤75秒。结束后一次返回，不是后台订阅或推送；遇数据源错误即停止。', {
+        instruments: { ...batch, maxItems: 5 }, samples: { type: 'integer', minimum: 2, maximum: 12 }, intervalSeconds: { type: 'integer', minimum: 2, maximum: 30 },
+    }, ['instruments'], (args, signal) => client.watch(args, signal), 80_000);
+    ctx.inject(['attachments'], child => {
+        child.tools.register(defineTool({
+            name: 'market_chart', description: '查询 K 线并生成原生 SVG 蜡烛图（含成交量）和 CSV 附件。最多查询1000根，图显示最近300根；SVG中嵌入数据源、时间与未收盘标记。',
+            parameters: {
+                market: { type: 'string', enum: ['crypto', 'us'], required: true }, symbol: { type: 'string', required: true },
+                interval: { type: 'string' }, limit: { type: 'integer' }, start: { type: 'string' }, end: { type: 'string' }, pageToken: { type: 'string' },
+            },
+            output: {
+                schema: { type: 'object', additionalProperties: false, properties: {
+                        symbol: { type: 'string', required: true }, bars: { type: 'integer', required: true }, displayedBars: { type: 'integer', required: true },
+                        provider: { type: 'string', required: true }, feed: { type: 'string', required: true }, delaySeconds: { type: 'integer', required: true }, fetchedAt: { type: 'string', required: true },
+                        hasMore: { type: 'boolean', required: true }, nextPageToken: { type: 'string' },
+                        rangeStart: { type: 'string' }, rangeEnd: { type: 'string' },
+                        files: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
+                                    attachmentId: { type: 'string', required: true }, name: { type: 'string', required: true }, bytes: { type: 'integer', required: true },
+                                } } },
+                    } },
+                render: (_args, value) => [
+                    { type: 'text', text: `${value.symbol}：${value.bars} 根K线，图显示 ${value.displayedBars} 根；${value.provider}/${value.feed}，数据源延迟 ${value.delaySeconds}s，获取时间 ${value.fetchedAt}。${value.hasMore ? '本页之外可能还有数据。' : ''}` },
+                    ...value.files.map(file => ({ type: 'file', attachment: { ...file, attachmentId: AttachmentId(file.attachmentId) } })),
+                ],
+            },
+            async execute(args, execution) {
+                const signal = signalFor(execution.signal), data = await client.candles(args, signal);
+                const svg = renderChart(data), csv = renderCsv(data), files = [];
+                for (const [extension, content] of [['svg', svg], ['csv', csv]]) {
+                    signal.throwIfAborted();
+                    async function* bytes() { signal.throwIfAborted(); yield Buffer.from(content); }
+                    files.push(await child.attachments.saveFileStream({ data: bytes(), signal, name: `${data.symbol}-${data.interval}.${extension}` }));
+                }
+                return { symbol: data.symbol, bars: data.candles.length, displayedBars: Math.min(300, data.candles.length), provider: data.provider, feed: data.feed, delaySeconds: data.delaySeconds, fetchedAt: data.fetchedAt, hasMore: data.hasMore, ...(data.nextPageToken ? { nextPageToken: data.nextPageToken } : {}), ...(data.rangeStart ? { rangeStart: data.rangeStart } : {}), ...(data.rangeEnd ? { rangeEnd: data.rangeEnd } : {}), files };
+            },
+            timeoutMs: client.config.timeoutMs + 10_000,
+            isConcurrencySafe: () => true,
+            presentCall: () => ({ card: 'generic', kind: 'read', title: '生成 K 线图与 CSV' }),
+        }));
+    });
+}

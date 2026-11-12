@@ -1,0 +1,61 @@
+{
+  "name": "dsh-market",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness 加密货币与美股实时报价、OHLCV K 线、盘口和行情采样",
+  "type": "module",
+  "license": "ISC",
+  "author": "charlesjson",
+  "repository": { "type": "git", "url": "git+https://github.com/charlesjson/dsh-market.git" },
+  "homepage": "https://github.com/charlesjson/dsh-market#readme",
+  "bugs": { "url": "https://github.com/charlesjson/dsh-market/issues" },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.19.0",
+    "dsh": "0.2.0-rc.2 || 0.2.2-rc.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4 || ~4.1.0",
+    "@deepseek-ai/dsh-attachment": "0.2.0-rc.2 || 0.2.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "0.2.0-rc.2 || 0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2 || 0.2.2-rc.1"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "~3.18.4"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-attachment": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-tool-executor-native": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.3"
+  }
+}
