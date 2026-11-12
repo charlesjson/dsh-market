@@ -15,6 +15,7 @@ async function harness(t, withAttachments = false) {
   }
   class Attachments extends Service {
     constructor(ctx) { super(ctx, 'attachments') }
+    fileHostPath(file) { return `/durable chart files/${file.attachmentId}/${file.name}` }
     async saveFileStream({ data, name, signal }) {
       const chunks = []
       for await (const chunk of data) { signal.throwIfAborted(); chunks.push(chunk) }
@@ -53,18 +54,24 @@ test('real Harness runtime registers tools, executes crypto query, validates inp
   assert.equal(sections.size, 0)
 })
 
-test('native chart tool saves SVG and CSV and projects durable file content', async t => {
+test('native chart tool returns a real PNG and ready-to-embed Markdown alongside SVG and CSV', async t => {
   const { ctx, files } = await harness(t, true)
   assert.ok(ctx.tools.get('market_chart'))
   const time = Date.now() - 3600_000
   t.mock.method(globalThis, 'fetch', async () => Response.json([[time, '100', '120', '90', '110', '1000', time + 3600_000 - 1]]))
   const result = await execute(ctx, 'market_chart', { market: 'crypto', symbol: 'BTC', interval: '1h' })
   assert.equal(result.isError, false, JSON.stringify(result))
-  assert.equal(files.length, 2)
-  assert.equal(files[0].name, 'BTCUSDT-1h.svg')
-  assert.match(files[0].bytes.toString(), /<svg/)
-  assert.equal(files[1].name, 'BTCUSDT-1h.csv')
-  assert.equal(result.content.filter(x => x.type === 'file').length, 2)
+  assert.equal(files.length, 3, 'chart must include an inline-compatible PNG preview')
+  assert.equal(files[0].name, 'BTCUSDT-1h.png')
+  assert.deepEqual([...files[0].bytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
+  assert.equal(files[0].bytes.readUInt32BE(16), 1200)
+  assert.equal(files[0].bytes.readUInt32BE(20), 730)
+  assert.equal(files[1].name, 'BTCUSDT-1h.svg')
+  assert.match(files[1].bytes.toString(), /<svg/)
+  assert.equal(files[2].name, 'BTCUSDT-1h.csv')
+  assert.equal(result.content.filter(x => x.type === 'file').length, 3)
+  const text = result.content.filter(x => x.type === 'text').map(x => x.text).join('\n')
+  assert.match(text, /!\[BTCUSDT 1h K线图\]\(<\/durable chart files\/[a-f0-9]+\/BTCUSDT-1h\.png>\)/)
 })
 
 test('plugin disposal cancels an in-flight provider request', async t => {
@@ -83,4 +90,17 @@ test('plugin disposal cancels an in-flight provider request', async t => {
   await fork.dispose()
   const result = await pending
   assert.equal(result.isError, true)
+})
+
+test('non-file-backed attachment stores explicitly report that inline preview has no path', async t => {
+  const { ctx } = await harness(t, true)
+  t.mock.method(ctx.attachments, 'fileHostPath', () => undefined)
+  const time = Date.now() - 3600_000
+  t.mock.method(globalThis, 'fetch', async () => Response.json([[time, '100', '120', '90', '110', '1000', time + 3600_000 - 1]]))
+  const result = await execute(ctx, 'market_chart', { market: 'crypto', symbol: 'BTC' })
+  assert.equal(result.isError, false, JSON.stringify(result))
+  const text = result.content.filter(x => x.type === 'text').map(x => x.text).join('\n')
+  assert.match(text, /没有可内嵌的本机路径/)
+  assert.ok(!text.includes('![BTCUSDT'))
+  assert.equal(result.content.filter(x => x.type === 'file').length, 3)
 })

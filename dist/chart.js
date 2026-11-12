@@ -44,3 +44,13 @@ export function renderCsv(data) {
     const header = 'market,symbol,currency,interval,provider,feed,delay_seconds,fetched_at,adjustment,time,end_time,open,high,low,close,volume,closed';
     return [header, ...data.candles.map(c => [data.market, data.symbol, data.currency, data.interval, data.provider, data.feed, data.delaySeconds, data.fetchedAt, data.adjustment, c.time, c.endTime, c.open, c.high, c.low, c.close, c.volume, c.closed].join(','))].join('\r\n') + '\r\n';
 }
+/** Raster preview for the host's inline Markdown image renderer. */
+export async function renderChartPng(svg, signal) {
+    signal.throwIfAborted();
+    const { Resvg } = await import('@resvg/resvg-js');
+    signal.throwIfAborted();
+    // Only our bounded, generated SVG reaches the renderer; it has no external assets.
+    const png = new Resvg(svg, { font: { defaultFontFamily: 'DejaVu Sans' } }).render().asPng();
+    signal.throwIfAborted();
+    return png;
+}

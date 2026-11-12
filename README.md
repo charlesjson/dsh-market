@@ -1,6 +1,6 @@
 # dsh-market · 加密货币与美股行情
 
-让 DeepSeek Harness 在对话中调用真实市场数据，查询报价、OHLCV K 线、成交量和盘口，生成可下载的 SVG 蜡烛图与 CSV。
+让 DeepSeek Harness 在对话中调用真实市场数据，查询报价、OHLCV K 线、成交量和盘口，在对话正文内嵌 PNG 蜡烛图，同时生成可下载的 SVG 与 CSV。
 独立插件，不需要另配大模型，不注册交易或下单功能。
 
 可以直接向 dsh 说：
@@ -16,16 +16,16 @@
 通过固定 GitHub 版本安装（安装后重启对应实例）：
 
 ```sh
-dsh plugin --profile web add github:charlesjson/dsh-market#v0.1.0
+dsh plugin --profile web add github:charlesjson/dsh-market#v0.1.1
 ```
 
 命令行或 headless 实例使用自己的 profile，例如：
 
 ```sh
-dsh plugin --profile headless add github:charlesjson/dsh-market#v0.1.0
+dsh plugin --profile headless add github:charlesjson/dsh-market#v0.1.1
 ```
 
-桌面版在插件管理页填写 `github:charlesjson/dsh-market#v0.1.0` 后安装并启用。`desktop` profile 由 Electron 管理，npm 安装的通用 dsh CLI 会拒绝管理它；需要命令行管理时使用桌面版内置命令运行时。不要给当前 profile 同时安装两个版本。
+桌面版在插件管理页填写 `github:charlesjson/dsh-market#v0.1.1` 后安装并启用。`desktop` profile 由 Electron 管理，npm 安装的通用 dsh CLI 会拒绝管理它；需要命令行管理时使用桌面版内置命令运行时。不要给当前 profile 同时安装两个版本。
 仓库保留编译后的 `dist`，通过 GitHub 安装不需要现场编译。也可在本地 `npm pack` 后安装生成的 tgz。
 包内包含 `dist` 运行文件；安装 tarball 无需 TypeScript 编译器。
 目标运行时：Node ≥22.19，dsh `0.2.2-rc.1`；另验证了 `0.2.0-rc.2` 的工具注册与报价执行。
@@ -53,6 +53,8 @@ dsh plugin --profile web remove dsh-market
 `market_watch` 是有界轮询：2–12 次、间隔 2–30 秒，间隔总计最多 60 秒，执行总时限 75 秒。
 采样完成后一次返回结果，遇到数据源错误停止后续轮询。它不提供 WebSocket 推送、对话外后台订阅或永久盯盘。
 数据源的地区限制、账户权限和限流会原样体现为明确错误，不自动切换成另一个市场或延迟数据源。
+
+画图结果现在额外包含 PNG 预览和 `inlineMarkdown`，模型在最终回答中用 `![说明](<图片绝对路径>)` 将图片直接嵌入正文。不会要求模型具备视觉输入能力。SVG/CSV 保留为下载附件。标准桌面版和 Web 版本机附件存储支持这条路径；自定义无文件路径的存储后端会明确提示只能打开 PNG 附件。旧回答中的 SVG 文件卡片不会自动转换，需要重新请求画图。
 
 ## 配置美股 Key
 
@@ -99,7 +101,7 @@ Key 只放在发往 Alpaca 固定 HTTPS 域名的请求头，不作为工具参�
 | `market_candles` | `market, symbol, interval?, limit?, start?, end?, pageToken?` | 升序 OHLCV、`closed`、数据源、时间范围、分页提示 |
 | `market_orderbook` | `market: "crypto", symbol, limit?`（1–100档） | 买卖盘口、价差、更新序号；源时间缺失时明确标注 |
 | `market_watch` | `instruments`（最多5个）、`samples?`、`intervalSeconds?` | 多次报价采样，`complete` 和停止原因 |
-| `market_chart` | 同 `market_candles` | SVG 图与 CSV 原生附件；需要宿主提供 `attachments` 服务 |
+| `market_chart` | 同 `market_candles` | PNG 预览、`inlineMarkdown` 图片语法及 SVG/CSV 原生附件；需要宿主提供 `attachments` 服务 |
 
 `market` 必须为 `crypto` 或 `us`。BTC、ETH 等未指定计价币的加密货币代码默认附加 USDT；可用 `ETHBTC`、`BTC/USDC` 明确交易对。
 USDT 与 USD 分别标注。美股使用 AAPL、NVDA、BRK.B 等 ticker，不做模糊名称猜测。
@@ -117,7 +119,7 @@ USDT 与 USD 分别标注。美股使用 AAPL、NVDA、BRK.B 等 ticker，不做
 - 没有成交的周期可能没有柱，不补零、不伪造 K 线。默认回看窗口有限，数量不足不代表没有更早历史。
 - Binance：省略 `start` 获取截止时间之前最近的一页；指定 `start` 后从起点取一页。`hasMore=true` 仅表示达到了本页条数上限，可能还有数据。往前查时把 `end` 设为本页第一根 `time`；往后查时把 `start` 设为最后一根 `endTime`。
 - Alpaca：按最新优先取一页，再升序返回。翻页传 `nextPageToken`，并把本页返回的 `rangeStart/rangeEnd` 作为下一页 `start/end`，保持周期与代码相同。窗口固定可以避免默认“现在”漂移。插件不自动拉取全部历史。
-- SVG 显示本次数据最后300根、包含成交量和未收盘虚线；CSV 包含本次返回的全部柱、来源及时间信息。SVG 可在浏览器打开，不依赖外部脚本或网络资源。
+- PNG 预览和 SVG 显示本次数据最后300根、包含成交量和未收盘虚线；CSV 包含本次返回的全部柱、来源及时间信息。SVG 可在浏览器打开，不依赖外部脚本或网络资源。
 
 ## Cordis 可选设置
 
