@@ -16,19 +16,19 @@
 通过固定 GitHub 版本安装（安装后重启对应实例）：
 
 ```sh
-dsh plugin --profile web add github:charlesjson/dsh-market#v0.2.0
+dsh plugin --profile web add github:charlesjson/dsh-market#v0.2.1
 ```
 
 命令行或 headless 实例使用自己的 profile，例如：
 
 ```sh
-dsh plugin --profile headless add github:charlesjson/dsh-market#v0.2.0
+dsh plugin --profile headless add github:charlesjson/dsh-market#v0.2.1
 ```
 
-桌面版在插件管理页填写 `github:charlesjson/dsh-market#v0.2.0` 后安装并启用。`desktop` profile 由 Electron 管理，npm 安装的通用 dsh CLI 会拒绝管理它；需要命令行管理时使用桌面版内置命令运行时。不要给当前 profile 同时安装两个版本。
+桌面版在插件管理页填写 `github:charlesjson/dsh-market#v0.2.1` 后安装并启用。`desktop` profile 由 Electron 管理，npm 安装的通用 dsh CLI 会拒绝管理它；需要命令行管理时使用桌面版内置命令运行时。不要给当前 profile 同时安装两个版本。
 仓库保留编译后的 `dist`，通过 GitHub 安装不需要现场编译。也可在本地 `npm pack` 后安装生成的 tgz。
 包内包含 `dist` 运行文件；安装 tarball 无需 TypeScript 编译器。
-目标运行时：Node ≥22.19，dsh `0.2.2-rc.1`；另验证了 `0.2.0-rc.2` 的工具注册与报价执行。
+目标运行时：Node ≥22.19，dsh `0.2.2-rc.2`；另验证了 `0.2.0-rc.2` 的工具注册与报价执行。
 插件跟随宿主的原生/PTC 工具执行方式，不替换宿主执行器。卸载后工具和系统指引自动撤回，进行中的请求会取消。
 
 ```sh
@@ -159,3 +159,13 @@ npm pack
 [Alpaca Market Data FAQ](https://docs.alpaca.markets/us/docs/market-data-faq)。
 
 交互图使用 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)，遵循 Apache-2.0 许可，生成文件保留署名、链接和许可全文。
+
+## DSH 兼容声明
+
+`engines.dsh` 与所有 DSH peer 依赖统一声明为 `0.2.0-rc.2 || >=0.2.2-rc.1 <0.3.0-0`。
+同一 0.2 系列的后续 RC、补丁和正式版本不再因为精确版本声明而被禁用；
+`0.3.0`（含预发布版）及更高版本需要重新验证。开发依赖和锁文件用于固定测试基线，
+不代表宿主只能运行该基线版本。兼容范围检查不等于未来接口已验证。
+
+本次在 DSH `0.2.2-rc.2` 的实际兼容检查器下验证，
+`npm test` 包含当前 RC、后续 0.2 版本和 0.3 预发布上限的回归检查。
