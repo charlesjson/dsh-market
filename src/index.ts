@@ -1,3 +1,4 @@
+import { assertHostMethods, hostMethodsAvailable } from './host-api.js'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import '@deepseek-ai/dsh-system-prompt'
@@ -42,6 +43,8 @@ HTML为本次查询的行情快照，不会自动接收后续行情。如果dsh�
 inlineMarkdown=null 表示当前附件后端没有可内嵌的本机路径，此时明确说明只能打开PNG附件。不要自行拼接图片路径，不把长数组逐行复述。`
 
 export function apply(ctx: Context, config: Partial<Config> = {}): void {
+  assertHostMethods('dsh-market', ctx, ['effect', 'inject', 'tools.register', 'tools.get', 'systemPrompt.section'])
+
   const client = new MarketClient(config)
   const lifetime = new AbortController()
   ctx.effect(() => () => lifetime.abort(new Error('dsh-market 插件已卸载')))
@@ -67,6 +70,7 @@ export function apply(ctx: Context, config: Partial<Config> = {}): void {
   }, ['instruments'], (args, signal) => client.watch(args, signal), 80_000)
 
   ctx.inject(['attachments'], child => {
+    if (!hostMethodsAvailable('dsh-market/chart', child, ['attachments.saveFileStream'])) return
     child.tools.register(defineTool({
       name: 'market_chart', description: '画可交互K线图：返回离线HTML（十字光标、悬停OHLCV、缩放和平移）的interactiveMarkdown链接、PNG正文预览及SVG/CSV。回答展示交互链接并内嵌PNG。HTML最多1000根，PNG/SVG最多300根，包含成交量、来源与未收盘状态；行情快照不自动刷新。',
       parameters: {
@@ -99,9 +103,9 @@ export function apply(ctx: Context, config: Partial<Config> = {}): void {
           async function* bytes() { signal.throwIfAborted(); yield content }
           files.push(await child.attachments.saveFileStream({ data: bytes(), signal, name: `${data.symbol}-${data.interval}.${extension}` }))
         }
-        const path = child.attachments.fileHostPath(files[0])
+        const path = typeof child.attachments.fileHostPath === 'function' ? child.attachments.fileHostPath(files[0]) : undefined
         const inlineMarkdown = path ? `![${data.symbol} ${data.interval} K线图](<${path.replace(/[<>\r\n]/g, c => encodeURIComponent(c))}>)` : null
-        const htmlPath = child.attachments.fileHostPath(files[3])
+        const htmlPath = typeof child.attachments.fileHostPath === 'function' ? child.attachments.fileHostPath(files[3]) : undefined
         const interactiveMarkdown = htmlPath ? `[打开 ${data.symbol} ${data.interval} 交互K线图](<${htmlPath.replace(/[<>\r\n]/g, c => encodeURIComponent(c))}>)` : null
         return { symbol: data.symbol, bars: data.candles.length, displayedBars: Math.min(300, data.candles.length), provider: data.provider, feed: data.feed, delaySeconds: data.delaySeconds, fetchedAt: data.fetchedAt, hasMore: data.hasMore, inlineMarkdown, interactiveMarkdown, ...(data.nextPageToken ? { nextPageToken: data.nextPageToken } : {}), ...(data.rangeStart ? { rangeStart: data.rangeStart } : {}), ...(data.rangeEnd ? { rangeEnd: data.rangeEnd } : {}), files }
       },

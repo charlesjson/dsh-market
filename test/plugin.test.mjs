@@ -95,9 +95,9 @@ test('plugin disposal cancels an in-flight provider request', async t => {
   assert.equal(result.isError, true)
 })
 
-test('non-file-backed attachment stores explicitly report that inline preview has no path', async t => {
+test('attachment stores without the optional fileHostPath API retain downloadable chart files', async t => {
   const { ctx } = await harness(t, true)
-  t.mock.method(ctx.attachments, 'fileHostPath', () => undefined)
+  Object.defineProperty(ctx.attachments, 'fileHostPath', { value: undefined, configurable: true })
   const time = Date.now() - 3600_000
   t.mock.method(globalThis, 'fetch', async () => Response.json([[time, '100', '120', '90', '110', '1000', time + 3600_000 - 1]]))
   const result = await execute(ctx, 'market_chart', { market: 'crypto', symbol: 'BTC' })
