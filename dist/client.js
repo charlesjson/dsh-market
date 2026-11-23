@@ -16,9 +16,6 @@ function provenance(i, connection, now) {
         fetchedAt: new Date(now).toISOString(),
     };
 }
-function quoteCurrency(symbol) {
-    return ['FDUSD', 'USDT', 'USDC', 'TUSD', 'DAI', 'BTC', 'ETH', 'BNB', 'EUR', 'TRY', 'USD', 'BRL', 'JPY'].find(q => symbol.length > q.length && symbol.endsWith(q)) ?? 'UNKNOWN';
-}
 function optionalRecord(value) { return value == null ? {} : record(value); }
 function age(sourceAt, now, threshold) {
     const ageSeconds = sourceAt === null ? null : Math.max(0, (now - Date.parse(sourceAt)) / 1000);
@@ -85,7 +82,10 @@ export class MarketClient {
         return { crypto: { provider: 'binance', configured: true, requiresKey: false }, us: { provider: 'alpaca', configured: Boolean(c.keyId && c.secretKey), feed: c.feed, delaySeconds: c.feed === 'delayed_sip' ? 900 : 0, coverage: c.feed === 'iex' ? 'IEX 单一交易所' : '全美交易所 SIP' }, transport: '按需 REST 查询；watch 为有界轮询，结果在采样结束后返回', verifiedConnectivity: false };
     }
     async quote(input, signal) {
-        const i = instrument(input), c = await this.connection(i);
+        return this.quoteInstrument(instrument(input), signal);
+    }
+    async quoteInstrument(i, signal) {
+        const c = await this.connection(i);
         signal.throwIfAborted();
         if (i.market === 'crypto') {
             // Actual trade time prevents a fresh 24h statistics window from hiding an idle market.
@@ -101,7 +101,7 @@ export class MarketClient {
                 throw new MarketError('该交易对没有成交数据');
             const trade = record(trades[0]), sourceAt = timestamp(trade.time), now = this.now();
             const price = numeric(trade.price), open = numeric(ticker.openPrice), change = price - open;
-            return { ...i, ...provenance(i, c, now), currency: quoteCurrency(i.symbol), price, sourceAt,
+            return { ...i, ...provenance(i, c, now), price, sourceAt,
                 ...age(sourceAt, now, this.config.staleAfterSeconds), bid: optionalNumber(ticker.bidPrice), ask: optionalNumber(ticker.askPrice),
                 quoteAt: null, change, changePercent: open ? change / open * 100 : null, changeBasis: 'rolling_24h',
                 open, high: numeric(ticker.highPrice), low: numeric(ticker.lowPrice), volume: numeric(ticker.volume),
@@ -119,12 +119,14 @@ export class MarketClient {
             volumeAt: optionalTime(daily.t), statisticsWindowEnd: null };
     }
     async quotes(input, signal) {
-        const items = instruments(record(input).instruments);
-        const results = await Promise.allSettled(items.map(i => this.quote(i, signal)));
+        return this.quoteInstruments(instruments(record(input).instruments), signal);
+    }
+    async quoteInstruments(items, signal) {
+        const results = await Promise.allSettled(items.map(i => this.quoteInstrument(i, signal)));
         signal.throwIfAborted();
         return {
             quotes: results.flatMap(r => r.status === 'fulfilled' ? [r.value] : []),
-            errors: results.flatMap((r, n) => r.status === 'rejected' ? [{ ...items[n], message: this.errorMessage(r.reason), retryAfterSeconds: r.reason instanceof MarketError ? r.reason.retryAfterSeconds ?? null : null }] : []),
+            errors: results.flatMap((r, n) => r.status === 'rejected' ? [{ market: items[n].market, symbol: items[n].symbol, message: this.errorMessage(r.reason), retryAfterSeconds: r.reason instanceof MarketError ? r.reason.retryAfterSeconds ?? null : null }] : []),
             complete: results.every(r => r.status === 'fulfilled'),
         };
     }
@@ -185,7 +187,7 @@ export class MarketClient {
             return validateCandle({ time, endTime, open: numeric(bar.o), high: numeric(bar.h), low: numeric(bar.l), close: numeric(bar.c), volume: numeric(bar.v), closed: Date.parse(endTime) <= now - (c.feed === 'delayed_sip' ? 900_000 : 0) });
         }).sort((a, b) => a.time.localeCompare(b.time));
         signal.throwIfAborted();
-        return { ...i, ...provenance(i, c, now), currency: i.market === 'us' ? 'USD' : quoteCurrency(i.symbol), interval, adjustment: 'raw', timezone: i.market === 'us' ? 'America/New_York' : 'UTC', candles, requestedLimit: limit, hasMore, nextPageToken, rangeStart, rangeEnd };
+        return { ...i, ...provenance(i, c, now), interval, adjustment: 'raw', timezone: i.market === 'us' ? 'America/New_York' : 'UTC', candles, requestedLimit: limit, hasMore, nextPageToken, rangeStart, rangeEnd };
     }
     lookback(interval, limit) {
         const factor = interval.endsWith('m') ? Number.parseInt(interval) / 390 : interval.endsWith('h') ? Number.parseInt(interval) / 6.5 : interval === '1w' ? 7 : interval === '1M' ? 31 : 1;
@@ -208,7 +210,7 @@ export class MarketClient {
             });
         };
         const bids = levels(data.bids), asks = levels(data.asks);
-        return { ...i, ...provenance(i, c, this.now()), currency: quoteCurrency(i.symbol), sourceAt: null, timestampNote: 'REST 盘口未提供交易所时间；fetchedAt 仅是本机接收时间', lastUpdateId: numeric(data.lastUpdateId), bids, asks, spread: bids.length && asks.length ? asks[0].price - bids[0].price : null };
+        return { ...i, ...provenance(i, c, this.now()), sourceAt: null, timestampNote: 'REST 盘口未提供交易所时间；fetchedAt 仅是本机接收时间', lastUpdateId: numeric(data.lastUpdateId), bids, asks, spread: bids.length && asks.length ? asks[0].price - bids[0].price : null };
     }
     async watch(input, caller) {
         const args = record(input), items = instruments(args.instruments, 5);
@@ -221,7 +223,7 @@ export class MarketClient {
             for (let n = 0; n < samples; n++) {
                 if (n)
                     await pause(intervalSeconds * 1000, undefined, { signal });
-                snapshots.push({ sampledAt: new Date(this.now()).toISOString(), ...await this.quotes({ instruments: items }, signal) });
+                snapshots.push({ sampledAt: new Date(this.now()).toISOString(), ...await this.quoteInstruments(items, signal) });
                 // Fail fast on rate limits/missing credentials instead of multiplying failures.
                 if (snapshots.at(-1).errors.length)
                     break;

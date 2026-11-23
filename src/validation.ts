@@ -32,20 +32,23 @@ export function dateArgument(value: unknown, label: string): string | undefined 
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(raw) || !Number.isFinite(Date.parse(raw))) throw new Error(`${label} 需要含时区的 RFC3339 时间，例如 2026-11-01T00:00:00Z`)
   return new Date(raw).toISOString()
 }
-export function instrument(value: unknown): Instrument {
+const quoteAssets = ['FDUSD', 'USDT', 'USDC', 'TUSD', 'BTC', 'ETH', 'BNB', 'EUR', 'TRY', 'USD', 'DAI', 'BRL', 'JPY']
+export type ParsedInstrument = Instrument & { currency: string }
+export function instrument(value: unknown): ParsedInstrument {
   const args = record(value)
   if (args.market !== 'crypto' && args.market !== 'us') throw new Error('market 只支持 crypto 或 us；请明确市场，避免 BTC 等代码歧义')
   const market: Market = args.market
   let symbol = text(args.symbol, 'symbol').toUpperCase()
   if (market === 'crypto') {
     if (!/^[A-Z0-9]{2,25}(?:[/-][A-Z0-9]{2,10})?$/.test(symbol)) throw new Error('加密货币代码格式无效，例如 BTC、BTCUSDT、BTC/USDT')
-    const paired = /[/-]/.test(symbol)
-    symbol = symbol.replace(/[/-]/g, '')
-    if (!paired && !['USDT', 'USDC', 'FDUSD', 'TUSD', 'BTC', 'ETH', 'BNB', 'EUR', 'TRY', 'USD', 'DAI', 'BRL', 'JPY'].some(q => symbol.length > q.length && symbol.endsWith(q))) symbol += 'USDT'
+    const [base, explicitQuote] = symbol.split(/[/-]/)
+    if (explicitQuote) return { market, symbol: base + explicitQuote, currency: explicitQuote }
+    const quote = quoteAssets.find(q => symbol.length > q.length && symbol.endsWith(q))
+    return { market, symbol: quote ? symbol : symbol + 'USDT', currency: quote ?? 'USDT' }
   } else if (!/^[A-Z][A-Z0-9.-]{0,14}$/.test(symbol)) throw new Error('美股代码格式无效，例如 AAPL、NVDA、BRK.B')
-  return { market, symbol }
+  return { market, symbol, currency: 'USD' }
 }
-export function instruments(value: unknown, max = 10): Instrument[] {
+export function instruments(value: unknown, max = 10): ParsedInstrument[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > max) throw new Error(`instruments 需要 1–${max} 个市场和代码对象`)
   return [...new Map(value.map(v => { const i = instrument(v); return [`${i.market}:${i.symbol}`, i] })).values()]
 }

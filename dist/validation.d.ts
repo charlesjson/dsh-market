@@ -7,5 +7,8 @@ export declare function optionalNumber(value: unknown): number | null;
 export declare function timestamp(value: unknown): string;
 export declare function optionalTime(value: unknown): string | null;
 export declare function dateArgument(value: unknown, label: string): string | undefined;
-export declare function instrument(value: unknown): Instrument;
-export declare function instruments(value: unknown, max?: number): Instrument[];
+export type ParsedInstrument = Instrument & {
+    currency: string;
+};
+export declare function instrument(value: unknown): ParsedInstrument;
+export declare function instruments(value: unknown, max?: number): ParsedInstrument[];

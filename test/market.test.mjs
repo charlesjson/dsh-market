@@ -33,7 +33,7 @@ function clearStockEnv(t) {
 beforeEach(t => clearStockEnv(t))
 
 test('symbols require an explicit market and normalize crypto pairs without changing stock class shares', () => {
-  for (const symbol of ['btc', 'BTCUSDT', 'BTC/USDT', 'BTC-USDT']) assert.deepEqual(instrument({ market: 'crypto', symbol }), { market: 'crypto', symbol: 'BTCUSDT' })
+  for (const symbol of ['btc', 'BTCUSDT', 'BTC/USDT', 'BTC-USDT']) assert.deepEqual(instrument({ market: 'crypto', symbol }), { market: 'crypto', symbol: 'BTCUSDT', currency: 'USDT' })
   assert.equal(instrument({ market: 'crypto', symbol: 'ETHBTC' }).symbol, 'ETHBTC')
   assert.equal(instrument({ market: 'us', symbol: 'brk.b' }).symbol, 'BRK.B')
   for (const args of [{ symbol: 'BTC' }, { market: 'us', symbol: '../../a' }, { market: 'crypto', symbol: 'BTC?foo=bar' }]) assert.throws(() => instrument(args))
@@ -227,4 +227,20 @@ test('chart and CSV retain provenance, incomplete state and all requested data',
   assert.equal(csv.trim().split('\r\n').length, 3)
   assert.match(csv, /USDT,1h,binance,spot,0/)
   assert.throws(() => renderChart({ ...data, candles: [] }), /没有 K 线/)
+})
+
+test('explicit quote currency survives batch normalization, sampling, and chart requests', async () => {
+  const symbols = []
+  const client = new MarketClient(config, async url => {
+    symbols.push(url.searchParams.get('symbol'))
+    return url.pathname.endsWith('/klines') ? Response.json([bar(NOW)]) : cryptoFetch(url)
+  }, () => NOW)
+  const pair = { market: 'crypto', symbol: 'BTC/GBP' }
+  const quote = await client.quotes({ instruments: [pair] }, signal())
+  const samples = await client.watch({ instruments: [pair], samples: 2, intervalSeconds: 2 }, signal())
+  const candles = await client.candles(pair, signal())
+  assert.equal(quote.quotes[0].currency, 'GBP')
+  assert.deepEqual(samples.snapshots.map(s => s.quotes[0].currency), ['GBP', 'GBP'])
+  assert.equal(candles.currency, 'GBP')
+  assert.deepEqual(new Set(symbols), new Set(['BTCGBP']))
 })

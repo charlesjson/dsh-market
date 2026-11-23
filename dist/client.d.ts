@@ -27,21 +27,22 @@ export declare class MarketClient {
         verifiedConnectivity: boolean;
     }>;
     quote(input: unknown, signal: AbortSignal): Promise<Quote>;
+    private quoteInstrument;
     quotes(input: unknown, signal: AbortSignal): Promise<{
         quotes: Quote[];
         errors: {
-            message: string;
-            retryAfterSeconds: number | null;
             market: import("./types.js").Market;
             symbol: string;
+            message: string;
+            retryAfterSeconds: number | null;
         }[];
         complete: boolean;
     }>;
+    private quoteInstruments;
     errorMessage(error: unknown): string;
     candles(input: unknown, signal: AbortSignal): Promise<Candles>;
     private lookback;
     orderbook(input: unknown, signal: AbortSignal): Promise<{
-        currency: string;
         sourceAt: null;
         timestampNote: string;
         lastUpdateId: number;
@@ -61,6 +62,7 @@ export declare class MarketClient {
         fetchedAt: string;
         market: import("./types.js").Market;
         symbol: string;
+        currency: string;
     }>;
     watch(input: unknown, caller: AbortSignal): Promise<{
         mode: string;
@@ -70,10 +72,10 @@ export declare class MarketClient {
         snapshots: {
             quotes: Quote[];
             errors: {
-                message: string;
-                retryAfterSeconds: number | null;
                 market: import("./types.js").Market;
                 symbol: string;
+                message: string;
+                retryAfterSeconds: number | null;
             }[];
             complete: boolean;
             sampledAt: string;

@@ -2,6 +2,7 @@ import { setTimeout as pause } from 'node:timers/promises'
 import { loadConnection, resolveConfig, type Config, type Connection } from './config.js'
 import { getJson, MarketError, type Fetcher } from './http.js'
 import type { Candle, Candles, Instrument, Provenance, Quote } from './types.js'
+import type { ParsedInstrument } from './validation.js'
 import { dateArgument, instrument, instruments, integer, numeric, optionalNumber, optionalTime, record, text, timestamp } from './validation.js'
 
 const BINANCE = 'https://data-api.binance.vision'
@@ -18,9 +19,6 @@ function provenance(i: Instrument, connection: Connection, now: number): Provena
     delaySeconds: i.market === 'us' && connection.feed === 'delayed_sip' ? 900 : 0,
     fetchedAt: new Date(now).toISOString(),
   }
-}
-function quoteCurrency(symbol: string): string {
-  return ['FDUSD', 'USDT', 'USDC', 'TUSD', 'DAI', 'BTC', 'ETH', 'BNB', 'EUR', 'TRY', 'USD', 'BRL', 'JPY'].find(q => symbol.length > q.length && symbol.endsWith(q)) ?? 'UNKNOWN'
 }
 function optionalRecord(value: unknown): Record<string, unknown> { return value == null ? {} : record(value) }
 function age(sourceAt: string | null, now: number, threshold: number) {
@@ -77,7 +75,10 @@ export class MarketClient {
     return { crypto: { provider: 'binance', configured: true, requiresKey: false }, us: { provider: 'alpaca', configured: Boolean(c.keyId && c.secretKey), feed: c.feed, delaySeconds: c.feed === 'delayed_sip' ? 900 : 0, coverage: c.feed === 'iex' ? 'IEX 单一交易所' : '全美交易所 SIP' }, transport: '按需 REST 查询；watch 为有界轮询，结果在采样结束后返回', verifiedConnectivity: false }
   }
   async quote(input: unknown, signal: AbortSignal): Promise<Quote> {
-    const i = instrument(input), c = await this.connection(i)
+    return this.quoteInstrument(instrument(input), signal)
+  }
+  private async quoteInstrument(i: ParsedInstrument, signal: AbortSignal): Promise<Quote> {
+    const c = await this.connection(i)
     signal.throwIfAborted()
     if (i.market === 'crypto') {
       // Actual trade time prevents a fresh 24h statistics window from hiding an idle market.
@@ -91,7 +92,7 @@ export class MarketClient {
       if (!Array.isArray(trades) || !trades.length) throw new MarketError('该交易对没有成交数据')
       const trade = record(trades[0]), sourceAt = timestamp(trade.time), now = this.now()
       const price = numeric(trade.price), open = numeric(ticker.openPrice), change = price - open
-      return { ...i, ...provenance(i, c, now), currency: quoteCurrency(i.symbol), price, sourceAt,
+      return { ...i, ...provenance(i, c, now), price, sourceAt,
         ...age(sourceAt, now, this.config.staleAfterSeconds), bid: optionalNumber(ticker.bidPrice), ask: optionalNumber(ticker.askPrice),
         quoteAt: null, change, changePercent: open ? change / open * 100 : null, changeBasis: 'rolling_24h',
         open, high: numeric(ticker.highPrice), low: numeric(ticker.lowPrice), volume: numeric(ticker.volume),
@@ -109,12 +110,14 @@ export class MarketClient {
       volumeAt: optionalTime(daily.t), statisticsWindowEnd: null }
   }
   async quotes(input: unknown, signal: AbortSignal) {
-    const items = instruments(record(input).instruments)
-    const results = await Promise.allSettled(items.map(i => this.quote(i, signal)))
+    return this.quoteInstruments(instruments(record(input).instruments), signal)
+  }
+  private async quoteInstruments(items: ParsedInstrument[], signal: AbortSignal) {
+    const results = await Promise.allSettled(items.map(i => this.quoteInstrument(i, signal)))
     signal.throwIfAborted()
     return {
       quotes: results.flatMap(r => r.status === 'fulfilled' ? [r.value] : []),
-      errors: results.flatMap((r, n) => r.status === 'rejected' ? [{ ...items[n], message: this.errorMessage(r.reason), retryAfterSeconds: r.reason instanceof MarketError ? r.reason.retryAfterSeconds ?? null : null }] : []),
+      errors: results.flatMap((r, n) => r.status === 'rejected' ? [{ market: items[n].market, symbol: items[n].symbol, message: this.errorMessage(r.reason), retryAfterSeconds: r.reason instanceof MarketError ? r.reason.retryAfterSeconds ?? null : null }] : []),
       complete: results.every(r => r.status === 'fulfilled'),
     }
   }
@@ -167,7 +170,7 @@ export class MarketClient {
       return validateCandle({ time, endTime, open: numeric(bar.o), high: numeric(bar.h), low: numeric(bar.l), close: numeric(bar.c), volume: numeric(bar.v), closed: Date.parse(endTime) <= now - (c.feed === 'delayed_sip' ? 900_000 : 0) })
     }).sort((a, b) => a.time.localeCompare(b.time))
     signal.throwIfAborted()
-    return { ...i, ...provenance(i, c, now), currency: i.market === 'us' ? 'USD' : quoteCurrency(i.symbol), interval, adjustment: 'raw', timezone: i.market === 'us' ? 'America/New_York' : 'UTC', candles, requestedLimit: limit, hasMore, nextPageToken, rangeStart, rangeEnd }
+    return { ...i, ...provenance(i, c, now), interval, adjustment: 'raw', timezone: i.market === 'us' ? 'America/New_York' : 'UTC', candles, requestedLimit: limit, hasMore, nextPageToken, rangeStart, rangeEnd }
   }
   private lookback(interval: string, limit: number): number {
     const factor = interval.endsWith('m') ? Number.parseInt(interval) / 390 : interval.endsWith('h') ? Number.parseInt(interval) / 6.5 : interval === '1w' ? 7 : interval === '1M' ? 31 : 1
@@ -187,7 +190,7 @@ export class MarketClient {
       })
     }
     const bids = levels(data.bids), asks = levels(data.asks)
-    return { ...i, ...provenance(i, c, this.now()), currency: quoteCurrency(i.symbol), sourceAt: null, timestampNote: 'REST 盘口未提供交易所时间；fetchedAt 仅是本机接收时间', lastUpdateId: numeric(data.lastUpdateId), bids, asks, spread: bids.length && asks.length ? asks[0].price - bids[0].price : null }
+    return { ...i, ...provenance(i, c, this.now()), sourceAt: null, timestampNote: 'REST 盘口未提供交易所时间；fetchedAt 仅是本机接收时间', lastUpdateId: numeric(data.lastUpdateId), bids, asks, spread: bids.length && asks.length ? asks[0].price - bids[0].price : null }
   }
   async watch(input: unknown, caller: AbortSignal) {
     const args = record(input), items = instruments(args.instruments, 5)
@@ -198,7 +201,7 @@ export class MarketClient {
     try {
       for (let n = 0; n < samples; n++) {
         if (n) await pause(intervalSeconds * 1000, undefined, { signal })
-        snapshots.push({ sampledAt: new Date(this.now()).toISOString(), ...await this.quotes({ instruments: items }, signal) })
+        snapshots.push({ sampledAt: new Date(this.now()).toISOString(), ...await this.quoteInstruments(items, signal) })
         // Fail fast on rate limits/missing credentials instead of multiplying failures.
         if (snapshots.at(-1)!.errors.length) break
       }

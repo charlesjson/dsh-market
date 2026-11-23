@@ -38,6 +38,7 @@ export function dateArgument(value, label) {
         throw new Error(`${label} 需要含时区的 RFC3339 时间，例如 2026-11-01T00:00:00Z`);
     return new Date(raw).toISOString();
 }
+const quoteAssets = ['FDUSD', 'USDT', 'USDC', 'TUSD', 'BTC', 'ETH', 'BNB', 'EUR', 'TRY', 'USD', 'DAI', 'BRL', 'JPY'];
 export function instrument(value) {
     const args = record(value);
     if (args.market !== 'crypto' && args.market !== 'us')
@@ -47,14 +48,15 @@ export function instrument(value) {
     if (market === 'crypto') {
         if (!/^[A-Z0-9]{2,25}(?:[/-][A-Z0-9]{2,10})?$/.test(symbol))
             throw new Error('加密货币代码格式无效，例如 BTC、BTCUSDT、BTC/USDT');
-        const paired = /[/-]/.test(symbol);
-        symbol = symbol.replace(/[/-]/g, '');
-        if (!paired && !['USDT', 'USDC', 'FDUSD', 'TUSD', 'BTC', 'ETH', 'BNB', 'EUR', 'TRY', 'USD', 'DAI', 'BRL', 'JPY'].some(q => symbol.length > q.length && symbol.endsWith(q)))
-            symbol += 'USDT';
+        const [base, explicitQuote] = symbol.split(/[/-]/);
+        if (explicitQuote)
+            return { market, symbol: base + explicitQuote, currency: explicitQuote };
+        const quote = quoteAssets.find(q => symbol.length > q.length && symbol.endsWith(q));
+        return { market, symbol: quote ? symbol : symbol + 'USDT', currency: quote ?? 'USDT' };
     }
     else if (!/^[A-Z][A-Z0-9.-]{0,14}$/.test(symbol))
         throw new Error('美股代码格式无效，例如 AAPL、NVDA、BRK.B');
-    return { market, symbol };
+    return { market, symbol, currency: 'USD' };
 }
 export function instruments(value, max = 10) {
     if (!Array.isArray(value) || value.length < 1 || value.length > max)
